@@ -12,6 +12,10 @@ import RequestPortalView from "./components/RequestPortalView";
 import BookingListView from "./components/BookingListView";
 import AdminDashboardView from "./components/AdminDashboardView";
 import PlatformDocumentationView from "./components/PlatformDocumentationView";
+import FAQView from "./components/FAQView";
+import AgentComparisonView from "./components/AgentComparisonView";
+import QuickHelpFAB from "./components/QuickHelpFAB";
+import AIChatView from "./components/AIChatView";
 
 import { Agent, ServiceOffering, Booking } from "./types";
 import { Sparkles, ShieldCheck, CheckCircle2, TrendingUp, Users, Calendar, ArrowRight } from "lucide-react";
@@ -122,7 +126,33 @@ export default function App() {
     fetchInitialData(); // Refresh capacities and sync agent workloads!
   };
 
+  // Comparison selection states
+  const [selectedCompareIds, setSelectedCompareIds] = useState<string[]>([]);
+  const [initialProfileTab, setInitialProfileTab] = useState<"about" | "booking" | "chat" | "collaboration">("about");
+
+  const handleAddToCompare = (id: string) => {
+    setSelectedCompareIds(prev => {
+      if (prev.includes(id)) return prev;
+      if (prev.length >= 3) {
+        alert("You can compare up to 3 virtual assistants side-by-side. Please remove one before adding more.");
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const handleRemoveFromCompare = (id: string) => {
+    setSelectedCompareIds(prev => prev.filter(item => item !== id));
+  };
+
+  const handleOpenBookingForAgentFromCompare = (agentId: string) => {
+    setInitialProfileTab("booking");
+    setSelectedAgentId(agentId);
+    setCurrentTab("agents");
+  };
+
   const handleNavigateToAgent = (agentId: string) => {
+    setInitialProfileTab("about");
     setSelectedAgentId(agentId);
     setCurrentTab("agents");
   };
@@ -140,6 +170,7 @@ export default function App() {
           if (tab !== "agents") {
             // Keep active locked agent but clear individual details profile triggers
             setSelectedAgentId(null);
+            setInitialProfileTab("about");
           } else if (activeMatchToken && matchedAgentId) {
             setSelectedAgentId(matchedAgentId);
           }
@@ -272,21 +303,48 @@ export default function App() {
             <AgentProfileView
               agent={activeAgent}
               activeMatchToken={activeMatchToken}
-              onGoBack={() => setSelectedAgentId(null)}
+              onGoBack={() => {
+                setSelectedAgentId(null);
+                setInitialProfileTab("about");
+              }}
               onBookingSuccess={handleBookingSuccess}
+              initialTab={initialProfileTab}
             />
           ) : (
             <AgentDirectoryView
               agents={agents}
               onSelectAgent={handleNavigateToAgent}
               onOpenMatcher={() => setCurrentTab("matching")}
+              selectedCompareIds={selectedCompareIds}
+              onAddToCompare={handleAddToCompare}
+              onRemoveFromCompare={handleRemoveFromCompare}
+              onNavigateToCompare={() => setCurrentTab("compare")}
             />
           )
+        )}
+
+        {/* TAB 3.5: AGENT COOPERATIVE SIDE BY SIDE COMPARE VIEW */}
+        {currentTab === "compare" && (
+          <AgentComparisonView
+            agents={agents}
+            selectedCompareIds={selectedCompareIds}
+            onAddToCompare={handleAddToCompare}
+            onRemoveFromCompare={handleRemoveFromCompare}
+            onSelectAgent={handleNavigateToAgent}
+            onOpenBooking={handleOpenBookingForAgentFromCompare}
+          />
         )}
 
         {/* TAB 4: INTENSIVE MATCH MATCHMAKING PORTAL */}
         {currentTab === "matching" && (
           <RequestPortalView onActivateMatch={handleActivateMatch} />
+        )}
+
+        {/* TAB 4.5: ACTIVE MULTI-TURN AI CONCIERGE CHATBOT */}
+        {currentTab === "ai-chat" && (
+          <div className="py-10 px-4 sm:px-6 lg:px-8">
+            <AIChatView />
+          </div>
         )}
 
         {/* TAB 5: BOOKINGS LIST CODES */}
@@ -308,6 +366,11 @@ export default function App() {
           <PlatformDocumentationView />
         )}
 
+        {/* TAB 8: VESTA COMPREHENSIVE FAQ SYSTEM */}
+        {currentTab === "faq" && (
+          <FAQView />
+        )}
+
       </main>
 
       {/* Footer component */}
@@ -319,6 +382,9 @@ export default function App() {
           <p>© 2026 Vesta Technologies. All rights reserved. Vetted competencies verified.</p>
         </div>
       </footer>
+
+      {/* Quick Help floating action button */}
+      <QuickHelpFAB onRedirectToFAQ={() => setCurrentTab("faq")} />
     </div>
   );
 }

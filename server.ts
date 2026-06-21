@@ -474,104 +474,109 @@ app.post("/api/match", async (req, res) => {
     let matchPrediction = null;
 
     if (apiKeyExist) {
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: process.env.GEMINI_API_KEY,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
           }
+        });
+
+        // Construct descriptive schema of services and agents for model prompt
+        const contextPrompt = `
+        You are an expert matchmaking system for Vesta, a high-end Virtual Assistant agency.
+        Our available Services are:
+        ${JSON.stringify(dbState.services.map(s => ({ id: s.id, name: s.name, description: s.description, requiredSkills: s.skillsRequired, assignedAgentId: s.assignedAgentId })), null, 2)}
+
+        Our current Human Assistants and their current status:
+        ${JSON.stringify(dbState.agents.map(a => ({ id: a.id, name: a.name, bio: a.bio, skills: a.skills, rating: a.rating, maxCapacity: a.maxCapacity, currentLoad: a.currentLoad, isAvailable: a.isAvailable })), null, 2)}
+
+        Client Input Query: "${finalQueryText}"
+
+        YOUR GOAL:
+        Identify the most appropriate Service category that matches the client's needs.
+        Determine the assigned agent of that service. If the assigned agent's rating, availability, or load makes another agent with overlapping skills a better candidate, you may pick an alternative agent, but prioritize matching the service's assignedAgentId first. Ensure the matched agent is currently active/available (isAvailable is true) and has capacity (currentLoad < maxCapacity).
+
+        Return a strict JSON response containing the properties:
+        1. 'matchedServiceId': string, one of the available service IDs.
+        2. 'matchedAgentId': string, one of the agent IDs.
+        3. 'confidenceScore': number, value between 0.0 and 1.0.
+        4. 'skillsExtracted': array of strings containing keys or technologies extracted from the query.
+        5. 'reasoningText': string, a warm summary explaining the credentials of this matched person.
+
+        Do not include any styling, markdown code block identifiers like \`\`\`json, or outer text wrapper. Return raw JSON.
+        `;
+
+        let response;
+        if (hasVoice) {
+          console.log("Processing voice binary stream through Gemini multimodal analysis");
+          // We call Gemini with the voice attachment for multimodal matching!
+          const voicePart = {
+            inlineData: {
+              mimeType: voiceDataMimeType,
+              data: voiceDataBase64
+            }
+          };
+          const voicePromptPart = {
+            text: `
+            Analyze this voice recording from a client looking for a virtual assistant.
+            1. Transcribe/determine what assistance services they need.
+            2. Match them based on the same agency dataset principles below.
+            
+            Vesta Services catalog:
+            ${JSON.stringify(dbState.services.map(s => ({ id: s.id, name: s.name, description: s.description, requiredSkills: s.skillsRequired })), null, 2)}
+            
+            Vesta Agents:
+            ${JSON.stringify(dbState.agents.map(a => ({ id: a.id, name: a.name, bio: a.bio, skills: a.skills, isAvailable: a.isAvailable, currentLoad: a.currentLoad })), null, 2)}
+
+            Produce a JSON output containing:
+            - 'transcribedText': string of the client voice transcription.
+            - 'matchedServiceId': matched service id.
+            - 'matchedAgentId': matched agent id.
+            - 'confidenceScore': number (0.0 to 1.0).
+            - 'skillsExtracted': array.
+            - 'reasoningText': string explanation.
+            `
+          };
+
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: { parts: [voicePart, voicePromptPart] },
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+
+          const textOutput = response.text || "";
+          console.log("Voice analysis output:", textOutput);
+          const parsed = JSON.parse(textOutput.trim());
+          finalQueryText = parsed.transcribedText || "Audio Voice Submission Request";
+          matchPrediction = {
+            matchedServiceId: parsed.matchedServiceId,
+            matchedAgentId: parsed.matchedAgentId,
+            confidenceScore: parsed.confidenceScore || 0.9,
+            skillsExtracted: parsed.skillsExtracted || [],
+            reasoningText: parsed.reasoningText || ""
+          };
+        } else {
+          // Standard text intent matching
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: contextPrompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+
+          const textOutput = response.text || "";
+          console.log("Text match output:", textOutput);
+          matchPrediction = JSON.parse(textOutput.trim());
         }
-      });
-
-      // Construct descriptive schema of services and agents for model prompt
-      const contextPrompt = `
-      You are an expert matchmaking system for Vesta, a high-end Virtual Assistant agency.
-      Our available Services are:
-      ${JSON.stringify(dbState.services.map(s => ({ id: s.id, name: s.name, description: s.description, requiredSkills: s.skillsRequired, assignedAgentId: s.assignedAgentId })), null, 2)}
-
-      Our current Human Assistants and their current status:
-      ${JSON.stringify(dbState.agents.map(a => ({ id: a.id, name: a.name, bio: a.bio, skills: a.skills, rating: a.rating, maxCapacity: a.maxCapacity, currentLoad: a.currentLoad, isAvailable: a.isAvailable })), null, 2)}
-
-      Client Input Query: "${finalQueryText}"
-
-      YOUR GOAL:
-      Identify the most appropriate Service category that matches the client's needs.
-      Determine the assigned agent of that service. If the assigned agent's rating, availability, or load makes another agent with overlapping skills a better candidate, you may pick an alternative agent, but prioritize matching the service's assignedAgentId first. Ensure the matched agent is currently active/available (isAvailable is true) and has capacity (currentLoad < maxCapacity).
-
-      Return a strict JSON response containing the properties:
-      1. 'matchedServiceId': string, one of the available service IDs.
-      2. 'matchedAgentId': string, one of the agent IDs.
-      3. 'confidenceScore': number, value between 0.0 and 1.0.
-      4. 'skillsExtracted': array of strings containing keys or technologies extracted from the query.
-      5. 'reasoningText': string, a warm summary explaining the credentials of this matched person.
-
-      Do not include any styling, markdown code block identifiers like \`\`\`json, or outer text wrapper. Return raw JSON.
-      `;
-
-      let response;
-      if (hasVoice) {
-        console.log("Processing voice binary stream through Gemini multimodal analysis");
-        // We call Gemini with the voice attachment for multimodal matching!
-        const voicePart = {
-          inlineData: {
-            mimeType: voiceDataMimeType,
-            data: voiceDataBase64
-          }
-        };
-        const voicePromptPart = {
-          text: `
-          Analyze this voice recording from a client looking for a virtual assistant.
-          1. Transcribe/determine what assistance services they need.
-          2. Match them based on the same agency dataset principles below.
-          
-          Vesta Services catalog:
-          ${JSON.stringify(dbState.services.map(s => ({ id: s.id, name: s.name, description: s.description, requiredSkills: s.skillsRequired })), null, 2)}
-          
-          Vesta Agents:
-          ${JSON.stringify(dbState.agents.map(a => ({ id: a.id, name: a.name, bio: a.bio, skills: a.skills, isAvailable: a.isAvailable, currentLoad: a.currentLoad })), null, 2)}
-
-          Produce a JSON output containing:
-          - 'transcribedText': string of the client voice transcription.
-          - 'matchedServiceId': matched service id.
-          - 'matchedAgentId': matched agent id.
-          - 'confidenceScore': number (0.0 to 1.0).
-          - 'skillsExtracted': array.
-          - 'reasoningText': string explanation.
-          `
-        };
-
-        response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: { parts: [voicePart, voicePromptPart] },
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
-
-        const textOutput = response.text || "";
-        console.log("Voice analysis output:", textOutput);
-        const parsed = JSON.parse(textOutput.trim());
-        finalQueryText = parsed.transcribedText || "Audio Voice Submission Request";
-        matchPrediction = {
-          matchedServiceId: parsed.matchedServiceId,
-          matchedAgentId: parsed.matchedAgentId,
-          confidenceScore: parsed.confidenceScore || 0.9,
-          skillsExtracted: parsed.skillsExtracted || [],
-          reasoningText: parsed.reasoningText || ""
-        };
-      } else {
-        // Standard text intent matching
-        response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: contextPrompt,
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
-
-        const textOutput = response.text || "";
-        console.log("Text match output:", textOutput);
-        matchPrediction = JSON.parse(textOutput.trim());
+      } catch (geminiError) {
+        console.warn("Gemini matchmaking block failed, activating local rule-based matching fallback:", geminiError);
+        matchPrediction = null;
       }
     }
 
@@ -664,6 +669,133 @@ app.post("/api/match", async (req, res) => {
   } catch (error) {
     console.error("Assistant matching failed:", error);
     res.status(500).json({ error: "Intelligence match engine encountered a state failure" });
+  }
+});
+
+
+// Helper function to produce an immediate context-rich response when Gemini API is unavailable/leaked
+function getLocalChatFallback(messages: any[]): string {
+  const lastUserMessage = messages[messages.length - 1]?.text || "";
+  let reply = "Hello! I am VIC, Vesta's virtual Intelligent Concierge. I am built with live database sync capabilities. (Note: Our cloud-based Gemini cognitive API is temporarily undergoing security maintenance, so I am running in local-database match mode).";
+  
+  const queryLower = lastUserMessage.toLowerCase();
+  
+  // Try to extract any email address from user text for automated live bookings status check!
+  let foundEmail = "";
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  const matchedEmail = lastUserMessage.match(emailRegex);
+  if (matchedEmail) {
+    foundEmail = matchedEmail[0].toLowerCase();
+  }
+
+  if (queryLower.includes("book") || queryLower.includes("schedule") || queryLower.includes("appointment") || queryLower.includes("reserve")) {
+    reply = "Our booking process is automated! Head to the **Agent Directory** tab, click on any virtual assistant's **Profile & Inquire** button, and choose their **Scheduler** tab to book a 15-minute consultation stream immediately.";
+  } else if (queryLower.includes("pricing") || queryLower.includes("rate") || queryLower.includes("cost") || queryLower.includes("fee") || queryLower.includes("pay") || queryLower.includes("retainer") || queryLower.includes("price")) {
+    reply = "Vesta features transparent tier-based pricing for our human assistants: \n" +
+            "- **Intermediate Tier:** $25/hour ($1,800/mo retainer)\n" +
+            "- **Senior Tier:** $35/hour ($2,450/mo retainer)\n" +
+            "- **Executive Expert Tier:** $45/hour ($3,200/mo retainer)\n\n" +
+            "Please check out the **Agent Comparison** tab for a detail-driven breakdown!";
+  } else if (queryLower.includes("status") || queryLower.includes("trouble") || queryLower.includes("error") || queryLower.includes("bug") || queryLower.includes("fail") || queryLower.includes("issue")) {
+    reply = "For active workload matching or alignment issues, use our **AI Matching Portal** tab. It has advanced text or speech alignment routines that bypass container workload queues to pair you with available human specialists instantly!";
+  } else if (queryLower.includes("recommend") || queryLower.includes("suggest") || queryLower.includes("choose") || queryLower.includes("find") || queryLower.includes("who is") || queryLower.includes("skills") || queryLower.includes("wordpress") || queryLower.includes("tech")) {
+    if (dbState.agents && dbState.agents.length > 0) {
+      const activeAgents = dbState.agents.filter(a => a.isAvailable);
+      const topRecs = activeAgents.slice(0, 2);
+      reply = "Based on our Vesta active database, here are highly recommended assistants matching client inquiries:\n\n" + 
+              topRecs.map(a => `- **${a.name}** (${a.title}): Specialty in *${a.specialties.join(", ")}*. Star Rating: ${a.rating}/5. Skills: [${a.skills.join(", ")}].`).join("\n") +
+              "\n\nYou can schedule directly under the **Agent Directory** tab!";
+    } else {
+      reply = "Our roster has skilled specialists in Tech Ops, Marketing, Operations, and Business Design. Check the **Agent Directory** to locate available assistants.";
+    }
+  } else if (foundEmail || queryLower.includes("my booking") || queryLower.includes("check booking") || queryLower.includes("booking status")) {
+    const searchEmail = foundEmail || "herocalze11@gmail.com";
+    const userBookings = dbState.bookings.filter(b => b.clientEmail.toLowerCase() === searchEmail.toLowerCase());
+    
+    if (userBookings.length > 0) {
+      reply = `### 📋 Live Booking Record Found!\nOne of Vesta's advisors has verified **${userBookings.length}** booking(s) registered under **${searchEmail}**:\n\n` +
+              userBookings.map((b, i) => `${i + 1}. **Scheduled with:** ${b.agentName} (ID: ${b.agentId})\n   **Slot/Session:** ${b.dateTime}\n   **Engagement Service:** ${b.serviceName}\n   **Special Note:** "${b.notes || "None"}"`).join("\n\n");
+    } else {
+      reply = `### 📋 Live Bookings Status Check\nI searched Vesta's active bookings list, but couldn't locate any scheduled sessions registered to **${searchEmail}**.\n\nPlease check your email spelling or navigate to **Agent Directory** to schedule a new consultation with one of our human experts!`;
+    }
+  } else if (queryLower.includes("hello") || queryLower.includes("hi") || queryLower.includes("hey") || queryLower.includes("greetings")) {
+    reply = "Greetings! I am **VIC** (Vesta Intelligent Concierge). I am actively synchronized with our human resources directory and scheduled bookings list.\n\nAsk me about:\n- 📋 **Booking lookup** (e.g., 'Check my booking for herocalze11@gmail.com')\n- 💸 Our standard flexible **retainer levels & costs**\n- 🤖 **Assistant recommendations** for specialized skills\n\nHow can I support your project operations today?";
+  }
+
+  return reply;
+}
+
+// 7. MULTI-TURN CONTEXT-AWARE SUPPORT CHATBOT (VIC)
+app.post("/api/support-chat", async (req, res) => {
+  const { messages } = req.body; // Array of { role: 'user' | 'model', text: string }
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: "Messages array with conversation history is required" });
+  }
+
+  const apiKeyExist = !!process.env.GEMINI_API_KEY;
+  if (!apiKeyExist) {
+    const reply = getLocalChatFallback(messages);
+    return res.json({ text: reply });
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build"
+        }
+      }
+    });
+
+    const systemInstruction = `
+You are "VIC" (Vesta Intelligent Concierge), an elite client success AI coach and support concierge on the Vesta Virtual Assistant Platform.
+Your mission is to keep clients delighted by helping them find assistants, explaining retainer options, guiding multi-step booking schedules, and resolving troubleshooting complaints.
+
+Here is the real-time live data directly synced from our system database:
+
+1. VESTA SERVICES CATALOG:
+${dbState.services.map(s => `- ID: ${s.id}, Name: ${s.name}, Description: ${s.description}, Skills: [${s.skillsRequired.join(', ')}]`).join('\n')}
+
+2. ACTIVE VIRTUAL HUMAN ASSISTANTS DIRECTORY:
+${dbState.agents.map(a => `- ID: ${a.id}, Name: ${a.name}, Title: ${a.title}, Tier: ${a.experienceLevel}, Rating: ${a.rating}/5 (${a.reviewsCount} reviews). Specialties: [${a.specialties.join(', ')}]. Core Skills: [${a.skills.join(', ')}]. Available: ${a.isAvailable ? 'Yes' : 'No'}. Workload: ${a.currentLoad}/${a.maxCapacity} active assignments.`).join('\n')}
+
+3. SYSTEM ACTIVE SECURED BOOKINGS LIST:
+${dbState.bookings.map(b => `- Client: ${b.clientName} (${b.clientEmail}), Scheduled with Assistant: ${b.agentName} (ID: ${b.agentId}) on ${b.dateTime} (Service: ${b.serviceName}). Special request notes: "${b.notes}"`).join('\n')}
+
+INSTRUCTIONS & BEHAVIOR ROLES:
+- Speak in a friendly, helpful, professional, and knowledgeable tone.
+- Do NOT make up fake assistant names, dates, or prices. Always stick strictly to Vesta's active database state listed above.
+- If the user asks for assistant recommendations, mention 1 or 2 specific assistants by name, explaining why they are a match based on their verified specialties and skills (e.g. "I highly recommend Sarah Chen for Tech Ops as she has 4.9 stars and Zendesk skills!").
+- If the user asks about booking or scheduling, inform them that they can book directly by going to the 'Agent Directory' tab, choosing an assistant, clicking 'Profile & Inquire', and heading over to their 'Scheduler' tab. It takes 1 click with zero upfront cost!
+- If the user provides a client email or name and asks about their booking status, actively look it up in Vesta's Live Bookings list above (do a case-insensitive check). If a match is found, present all details (the assistant, slot, date, category and notes) so they know it is secure. If not, politely ask them to verify their booking email or direct them to book again under the Client Bookings tab.
+- If they are troubleshooting or having system issues, explain that our smart matching portal automatically balances assistant workloads to prevent client delays, and they can try submitting text or voice queries in the 'AI Matching Portal' tab to obtain a refined match.
+- Keep responses clean, concise, structured, and easy to read using Markdown format.
+`;
+
+    // Convert input messages to Gemini structure [ { role: 'user' | 'model', parts: [ { text: string } ] } ]
+    const contents = messages.map(msg => ({
+      role: msg.role === "user" ? "user" : "model",
+      parts: [{ text: msg.text }]
+    }));
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: contents,
+      config: {
+        systemInstruction: systemInstruction,
+        temperature: 0.7,
+      }
+    });
+
+    const replyText = response.text || "I am here to assist you with active bookings, price tiers, and human resources. Let me know what you need!";
+    res.json({ text: replyText });
+
+  } catch (error) {
+    console.warn("Gemini VIC support bot error (falling back to keyword matching):", error);
+    const fallbackReply = getLocalChatFallback(messages);
+    res.json({ text: fallbackReply });
   }
 });
 

@@ -7,15 +7,23 @@ interface AgentProfileViewProps {
   activeMatchToken: string | null;
   onGoBack: () => void;
   onBookingSuccess: (booking: Booking) => void;
+  initialTab?: "about" | "booking" | "chat" | "collaboration";
 }
 
 export default function AgentProfileView({
   agent,
   activeMatchToken,
   onGoBack,
-  onBookingSuccess
+  onBookingSuccess,
+  initialTab = "about"
 }: AgentProfileViewProps) {
-  const [activeTab, setActiveTab] = useState<"about" | "booking" | "chat" | "collaboration">("about");
+  const [activeTab, setActiveTab] = useState<"about" | "booking" | "chat" | "collaboration">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   
   // Booking states
   const [clientName, setClientName] = useState("");
@@ -168,7 +176,7 @@ export default function AgentProfileView({
     let interval: any;
     if (videoState === "live" && videoTimer > 0) {
       interval = setInterval(() => {
-        setVideoState(prev => {
+        setVideoTimer(prev => {
           if (prev <= 1) {
             setVideoState("ended");
             return 0;

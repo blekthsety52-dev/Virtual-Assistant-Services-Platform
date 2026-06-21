@@ -20,8 +20,11 @@ export default function Header({
     { id: "home", label: "Overview" },
     { id: "services", label: "Service Catalog" },
     { id: "agents", label: "Agent Directory" },
+    { id: "compare", label: "Agent Comparison" },
     { id: "matching", label: "AI Matching Portal" },
+    { id: "ai-chat", label: "AI Concierge Chat" },
     { id: "bookings", label: "Client Bookings" },
+    { id: "faq", label: "FAQ Help Center" },
     { id: "admin", label: "Admin Console" },
     { id: "documentation", label: "Documentation Hub" }
   ];
@@ -119,7 +122,7 @@ export default function Header({
               currentTab === item.id ? "border-blue-500 font-bold text-blue-400" : ""
             }`}
           >
-            {item.id === "bookings" ? "Bookings" : item.id === "admin" ? "Admin" : "Docs"}
+            {item.id === "bookings" ? "Bookings" : item.id === "matching" ? "AI Match" : item.id === "ai-chat" ? "AI Chat" : item.id === "faq" ? "FAQ" : item.id === "admin" ? "Admin" : item.id === "compare" ? "Comparison" : "Docs"}
           </button>
         ))}
       </div>

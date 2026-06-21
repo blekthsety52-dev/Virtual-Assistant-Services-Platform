@@ -1,17 +1,25 @@
 import React, { useState } from "react";
 import { Agent } from "../types";
-import { Search, Eye, Star, AlertCircle } from "lucide-react";
+import { Search, Eye, Star, AlertCircle, Sparkles, ArrowRight } from "lucide-react";
 
 interface AgentDirectoryViewProps {
   agents: Agent[];
   onSelectAgent: (agentId: string) => void;
   onOpenMatcher: () => void;
+  selectedCompareIds: string[];
+  onAddToCompare: (agentId: string) => void;
+  onRemoveFromCompare: (agentId: string) => void;
+  onNavigateToCompare: () => void;
 }
 
 export default function AgentDirectoryView({
   agents,
   onSelectAgent,
-  onOpenMatcher
+  onOpenMatcher,
+  selectedCompareIds,
+  onAddToCompare,
+  onRemoveFromCompare,
+  onNavigateToCompare
 }: AgentDirectoryViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [experienceFilter, setExperienceFilter] = useState("all");
@@ -197,13 +205,33 @@ export default function AgentDirectoryView({
               </div>
 
               {/* Booking CTAs */}
-              <div className="bg-slate-955/50 border-t border-slate-800/80 py-3.5 px-6 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 font-mono">
-                  {agent.isAvailable ? "● Accepting matches" : "● Fully allocated"}
-                </span>
+              <div className="bg-slate-955/50 border-t border-slate-800/80 py-3.5 px-6 flex items-center justify-between gap-2 border-r last:border-r-0">
+                {(() => {
+                  const isCompared = selectedCompareIds.includes(agent.id);
+                  return (
+                    <button
+                      onClick={() => {
+                        if (isCompared) {
+                          onRemoveFromCompare(agent.id);
+                        } else {
+                          onAddToCompare(agent.id);
+                        }
+                      }}
+                      className={`text-[10px] sm:text-xs font-mono font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer select-none ${
+                        isCompared
+                          ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-bold"
+                          : "bg-slate-950 border-slate-800/85 text-slate-400 hover:text-white hover:border-slate-700"
+                      }`}
+                      title={isCompared ? "Click to remove from comparison selection" : "Select up to 3 assistants to compare side-by-side"}
+                    >
+                      {isCompared ? "✓ Added" : "+ Compare"}
+                    </button>
+                  );
+                })()}
+
                 <button
                   onClick={() => onSelectAgent(agent.id)}
-                  className="flex items-center gap-1.5 text-[11px] text-blue-400 hover:text-white bg-blue-500/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-550 font-bold font-display px-3 py-1.5 rounded-lg transition cursor-pointer"
+                  className="flex items-center gap-1.5 text-[11px] text-blue-400 hover:text-white bg-blue-500/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-550 font-bold font-display px-3 py-1.5 rounded-lg transition cursor-pointer shrink-0"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   <span>Profile & Inquire</span>
@@ -219,6 +247,29 @@ export default function AgentDirectoryView({
           </div>
         )}
       </div>
+
+      {/* FLOAT COMPARISON TRAY TRIGGER BANNER */}
+      {selectedCompareIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-950/95 border-2 border-blue-500/35 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-6 animate-slide-up backdrop-blur-md max-w-lg w-[90%] sm:w-auto justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-550/20 flex items-center justify-center font-bold text-xs shrink-0 font-mono">
+              {selectedCompareIds.length}
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-white uppercase font-display tracking-wide">Assistant Comparison Slot List</h4>
+              <p className="text-[10px] text-slate-400 leading-normal font-medium mt-0.5">Ready to inspect side-by-side criteria details.</p>
+            </div>
+          </div>
+
+          <button
+            onClick={onNavigateToCompare}
+            className="bg-blue-600 hover:bg-blue-500 text-white font-display font-semibold text-xs py-2 px-3.5 rounded-xl transition cursor-pointer shadow shadow-blue-500/20 hover:shadow-blue-500/30 shrink-0 flex items-center gap-1"
+          >
+            <span>Compare Now</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
