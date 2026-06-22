@@ -5,7 +5,6 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/Virtual-Assistant-Services-Platform/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
