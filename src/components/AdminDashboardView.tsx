@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Agent, ClientRequestLog, PlatformStats, ServiceOffering } from "../types";
-import { Activity, ShieldAlert, Cpu, Hammer, TrendingUp, AlertTriangle, ToggleLeft, ToggleRight, Settings } from "lucide-react";
+import { Activity, ShieldAlert, Cpu, Hammer, TrendingUp, AlertTriangle, ToggleLeft, ToggleRight, Settings, UserPlus, Sparkles, CheckCircle } from "lucide-react";
 
 interface AdminDashboardViewProps {
   agents: Agent[];
@@ -17,6 +17,131 @@ export default function AdminDashboardView({
   const [logs, setLogs] = useState<ClientRequestLog[]>([]);
   const [isUpdatingAgentId, setIsUpdatingAgentId] = useState<string | null>(null);
   const [overridingLogId, setOverridingLogId] = useState<string | null>(null);
+
+  // New assistant form states
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentTitle, setNewAgentTitle] = useState("");
+  const [newAgentBio, setNewAgentBio] = useState("");
+  const [newAgentExperience, setNewAgentExperience] = useState<"Intermediate" | "Senior" | "Executive Expert">("Senior");
+  const [newAgentSkills, setNewAgentSkills] = useState("");
+  const [newAgentSpecialties, setNewAgentSpecialties] = useState("");
+  const [newAgentMaxCapacity, setNewAgentMaxCapacity] = useState(5);
+  const [newAgentAvatar, setNewAgentAvatar] = useState("");
+  const [newAgentTimeSlots, setNewAgentTimeSlots] = useState("09:00 AM, 11:00 AM, 01:30 PM, 04:00 PM");
+  
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+
+  const presetAssistants = [
+    {
+      name: "Alex Rivera",
+      title: "AI Specialist & Solutions Architect",
+      bio: "Helping organizations streamline operations with custom AI workflows, prompt design patterns, and enterprise tools integration.",
+      experienceLevel: "Executive Expert" as const,
+      skills: "Prompt Engineering, Gemini API, Python, GPT-4, OpenAI, Zapier Integrations, LangChain",
+      specialties: "Generative AI custom builds, API webhook automation, workflow streamlining",
+      maxCapacity: 4,
+      avatar: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=200&h=200",
+      timeSlots: "09:00 AM, 10:30 AM, 02:00 PM, 04:30 PM"
+    },
+    {
+      name: "Tanya Patel",
+      title: "Bilingual Operations Coordinator",
+      bio: "Frictionless multi-lingual customer experience operations manager with 4+ years of remote business process support. Expert in high retention strategy.",
+      experienceLevel: "Senior" as const,
+      skills: "Intercom, Zendesk, Customer Success, G-Suite, Spanish Translation, English Bilingual, Conflict Resolution",
+      specialties: "Multi-lingual scaling, retention planning, ticket workflow setup",
+      maxCapacity: 6,
+      avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=200&h=200",
+      timeSlots: "10:00 AM, 12:00 PM, 02:30 PM, 05:00 PM"
+    },
+    {
+      name: "Liam O'Connor",
+      title: "E-Commerce Growth Assistant",
+      bio: "Dedicated Shopify virtual specialist. Focused on storefront listings audits, inventory management, Canva asset production, and CRM automation.",
+      experienceLevel: "Intermediate" as const,
+      skills: "Shopify, Canva, Inventory Management, Email Copywriting, Mailchimp, Klaviyo, Social Media Scheduling",
+      specialties: "Shopify backend maintenance, retail visual templates, campaign execution",
+      maxCapacity: 5,
+      avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200",
+      timeSlots: "08:00 AM, 11:00 AM, 01:00 PM, 03:30 PM"
+    }
+  ];
+
+  const handleAutofillPreset = () => {
+    const randomPreset = presetAssistants[Math.floor(Math.random() * presetAssistants.length)];
+    setNewAgentName(randomPreset.name);
+    setNewAgentTitle(randomPreset.title);
+    setNewAgentBio(randomPreset.bio);
+    setNewAgentExperience(randomPreset.experienceLevel);
+    setNewAgentSkills(randomPreset.skills);
+    setNewAgentSpecialties(randomPreset.specialties);
+    setNewAgentMaxCapacity(randomPreset.maxCapacity);
+    setNewAgentAvatar(randomPreset.avatar);
+    setNewAgentTimeSlots(randomPreset.timeSlots);
+    setFormError(null);
+    setFormSuccess("Autofilled with a high-fidelity assistant preset! ✨");
+    setTimeout(() => setFormSuccess(null), 3000);
+  };
+
+  const handleSubmitAssistant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setFormSuccess(null);
+
+    if (!newAgentName.trim() || !newAgentTitle.trim() || !newAgentBio.trim()) {
+      setFormError("Please fill out the name, professional title, and biography.");
+      return;
+    }
+
+    setIsSubmittingForm(true);
+
+    try {
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newAgentName.trim(),
+          title: newAgentTitle.trim(),
+          bio: newAgentBio.trim(),
+          experienceLevel: newAgentExperience,
+          skills: newAgentSkills.split(",").map(s => s.trim()).filter(Boolean),
+          specialties: newAgentSpecialties.split(",").map(s => s.trim()).filter(Boolean),
+          timeSlots: newAgentTimeSlots.split(",").map(s => s.trim()).filter(Boolean),
+          maxCapacity: Number(newAgentMaxCapacity) || 5,
+          avatar: newAgentAvatar.trim() || undefined
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFormSuccess(`Successfully registered ${data.agent.name} as a new assistant!`);
+        
+        // Reset fields
+        setNewAgentName("");
+        setNewAgentTitle("");
+        setNewAgentBio("");
+        setNewAgentSkills("");
+        setNewAgentSpecialties("");
+        setNewAgentAvatar("");
+        setNewAgentMaxCapacity(5);
+        setNewAgentTimeSlots("09:00 AM, 11:00 AM, 01:30 PM, 04:00 PM");
+
+        // Force reload parent list & admin stats
+        onRefreshData();
+        await fetchAdminData();
+      } else {
+        const errData = await response.json();
+        setFormError(errData.error || "Failed to create new assistant.");
+      }
+    } catch (err) {
+      console.error("Failed to submit assistant", err);
+      setFormError("Network error. Could not connect to database.");
+    } finally {
+      setIsSubmittingForm(false);
+    }
+  };
 
   useEffect(() => {
     fetchAdminData();
@@ -136,6 +261,158 @@ export default function AdminDashboardView({
         
         {/* Core human assistants load gating */}
         <div className="lg:col-span-1 space-y-6">
+          
+          {/* Interactive registration form */}
+          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
+            <div className="flex items-center justify-between mb-1.5">
+              <h3 className="font-display font-medium text-white text-sm">Add Virtual Assistant</h3>
+              <button
+                type="button"
+                onClick={handleAutofillPreset}
+                className="text-[10px] text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 transition"
+                title="Autofill fields with high-quality presets"
+              >
+                <Sparkles className="w-3 h-3 text-blue-400" />
+                Autofill Preset
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-normal mb-5">
+              Register a new assistant profile directly into Vesta's active registry for live scheduling and matchmaking.
+            </p>
+
+            <form onSubmit={handleSubmitAssistant} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  value={newAgentName}
+                  onChange={(e) => setNewAgentName(e.target.value)}
+                  placeholder="e.g. Eleanor Vance"
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Professional Title *</label>
+                <input
+                  type="text"
+                  value={newAgentTitle}
+                  onChange={(e) => setNewAgentTitle(e.target.value)}
+                  placeholder="e.g. Operations & Automation Lead"
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Experience Tier</label>
+                  <select
+                    value={newAgentExperience}
+                    onChange={(e) => setNewAgentExperience(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition cursor-pointer"
+                  >
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Executive Expert">Executive Expert</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Max Workload</label>
+                  <input
+                    type="number"
+                    value={newAgentMaxCapacity}
+                    onChange={(e) => setNewAgentMaxCapacity(Number(e.target.value))}
+                    min={1}
+                    max={15}
+                    className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Professional Biography *</label>
+                <textarea
+                  value={newAgentBio}
+                  onChange={(e) => setNewAgentBio(e.target.value)}
+                  placeholder="Summarize experience, client success indicators, and core specialties..."
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition resize-none leading-relaxed"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Core Skills (comma separated)</label>
+                <input
+                  type="text"
+                  value={newAgentSkills}
+                  onChange={(e) => setNewAgentSkills(e.target.value)}
+                  placeholder="e.g. Zendesk, CRM Management, Conflict Resolution"
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Specialties (comma separated)</label>
+                <input
+                  type="text"
+                  value={newAgentSpecialties}
+                  onChange={(e) => setNewAgentSpecialties(e.target.value)}
+                  placeholder="e.g. High NPS ticket routing, SLA crisis management"
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Profile Photo / Avatar URL</label>
+                <input
+                  type="url"
+                  value={newAgentAvatar}
+                  onChange={(e) => setNewAgentAvatar(e.target.value)}
+                  placeholder="https://images.unsplash.com/photo-..."
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">Booking Time Slots (comma separated)</label>
+                <input
+                  type="text"
+                  value={newAgentTimeSlots}
+                  onChange={(e) => setNewAgentTimeSlots(e.target.value)}
+                  placeholder="e.g. 09:00 AM, 11:00 AM, 02:00 PM"
+                  className="w-full bg-slate-950 border border-slate-800 outline-none px-3 py-2 text-xs text-slate-200 rounded-lg focus:border-blue-500/80 transition"
+                />
+              </div>
+
+              {formError && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px] p-2.5 rounded-lg flex items-start gap-1.5 font-mono">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {formSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] p-2.5 rounded-lg flex items-start gap-1.5 font-mono">
+                  <CheckCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{formSuccess}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSubmittingForm}
+                className="w-full bg-blue-600 hover:bg-blue-550 text-white font-display text-xs font-semibold py-2 px-4 rounded-xl transition flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                {isSubmittingForm ? "Registering Assistant..." : "Add Assistant to Registry"}
+              </button>
+            </form>
+          </div>
+
           <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
             <h3 className="font-display font-medium text-white text-sm mb-1.5">Core Capacity Controls</h3>
             <p className="text-[11px] text-slate-500 leading-normal mb-5">

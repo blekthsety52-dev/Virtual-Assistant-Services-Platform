@@ -302,6 +302,57 @@ app.get("/api/agents/:id", (req, res) => {
   res.json(agent);
 });
 
+app.post("/api/agents", (req, res) => {
+  const { name, avatar, title, bio, skills, experienceLevel, maxCapacity, specialties, timeSlots } = req.body;
+
+  if (!name || !title || !bio) {
+    return res.status(400).json({ error: "Required fields (name, title, bio) are missing." });
+  }
+
+  const formattedSkills = Array.isArray(skills)
+    ? skills
+    : typeof skills === "string"
+      ? skills.split(",").map(s => s.trim()).filter(Boolean)
+      : [];
+
+  const formattedSpecialties = Array.isArray(specialties)
+    ? specialties
+    : typeof specialties === "string"
+      ? specialties.split(",").map(s => s.trim()).filter(Boolean)
+      : [];
+
+  const formattedTimeSlots = Array.isArray(timeSlots) && timeSlots.length > 0
+    ? timeSlots
+    : typeof timeSlots === "string"
+      ? timeSlots.split(",").map(s => s.trim()).filter(Boolean)
+      : ["09:00 AM", "11:00 AM", "01:30 PM", "04:00 PM"];
+
+  const avatarUrl = avatar || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200&h=200";
+
+  const newAgent = {
+    id: "agent-" + (dbState.agents.length + 1) + "-" + Math.random().toString(36).substring(2, 6),
+    name,
+    avatar: avatarUrl,
+    title,
+    bio,
+    skills: formattedSkills,
+    experienceLevel: experienceLevel || "Senior",
+    rating: 5.0,
+    reviewsCount: 0,
+    reviews: [],
+    currentLoad: 0,
+    maxCapacity: Number(maxCapacity) || 5,
+    isAvailable: true,
+    timeSlots: formattedTimeSlots,
+    specialties: formattedSpecialties
+  };
+
+  dbState.agents.push(newAgent);
+  saveDatabase();
+
+  res.status(201).json({ success: true, agent: newAgent });
+});
+
 app.post("/api/agents/:id/status", (req, res) => {
   const { isAvailable, currentLoad, maxCapacity } = req.body;
   const index = dbState.agents.findIndex(a => a.id === req.params.id);
@@ -395,33 +446,128 @@ app.post("/api/chats/:token/messages", (req, res) => {
 
   dbState.chats[token].messages.push(newMessage);
 
-  // Trigger simulated interactive assistant response if the client wrote a message!
+  // Trigger interactive assistant response if the client wrote a message!
   if (sender === "client") {
-    setTimeout(() => {
-      const agent = dbState.agents.find(a => a.id === dbState.chats[token].agentId);
-      const agentFirstName = agent ? agent.name.split(" ")[0] : "Agent";
-      
-      let replyContent = `Hi! This is ${agentFirstName} here. Thank you for connecting through Vesta's Intelligent Matching portal. I have received your details! Let's arrange our kickoff consultation. Feel free to book direct in my scheduler or drop any files/templates here!`;
-      
-      if (content.toLowerCase().includes("pricing") || content.toLowerCase().includes("cost")) {
-        replyContent = `Absolutely! I can take a look at your budget tier. Based on our match logs, we can coordinate our starter hours, standard retaining, or execute on an hourly scope. What works best for your initial scale?`;
-      } else if (content.toLowerCase().includes("meeting") || content.toLowerCase().includes("call") || content.toLowerCase().includes("zoom")) {
-        replyContent = `I am completely free during the available times listed on my calendar panel! Go ahead and select a slot in the Booking Scheduler block and we'll jump on a secure line right away.`;
+    // Execute asynchronously in the background so the client gets an immediate response
+    setTimeout(async () => {
+      const chat = dbState.chats[token];
+      if (!chat) return;
+
+      const agent = dbState.agents.find(a => a.id === chat.agentId);
+      if (!agent) return;
+
+      const apiKeyExist = !!process.env.GEMINI_API_KEY;
+      if (!apiKeyExist) {
+        const replyContent = getLocalAgentFallback(agent, content);
+        chat.messages.push({
+          id: "msg_" + Math.random().toString(36).substring(2, 9),
+          sender: "agent",
+          content: replyContent,
+          timestamp: new Date().toISOString()
+        });
+        saveDatabase();
+        return;
       }
 
-      dbState.chats[token].messages.push({
-        id: "msg_" + Math.random().toString(36).substring(2, 9),
-        sender: "agent",
-        content: replyContent,
-        timestamp: new Date().toISOString()
-      });
-      saveDatabase();
-    }, 1500);
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: process.env.GEMINI_API_KEY,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
+          }
+        });
+
+        const systemInstruction = `
+You are "${agent.name}", a highly skilled professional Virtual Assistant on the Vesta platform.
+Your professional title is: "${agent.title}".
+Your experience tier is: "${agent.experienceLevel}".
+Your current utilization is: ${agent.currentLoad}/${agent.maxCapacity} active assignments.
+Your profile biography is: "${agent.bio}".
+Your core skills are: ${agent.skills.join(", ")}.
+Your specialties are: ${agent.specialties.join(", ")}.
+Your available booking times are: ${agent.timeSlots.join(", ")}.
+
+CONTEXT:
+You are chatting with a prospective client in your private, secure "Workspace Consultation" channel. 
+The client has reached out to you through Vesta's Intelligent Match portal.
+
+BEHAVIORAL GUIDELINES:
+- Stay completely in character as "${agent.name}". Speak in a highly helpful, professional, friendly, and expert tone that matches your biography and title.
+- Keep your replies concise, structured, and easy to read. Use bullet points or short paragraphs with elegant Markdown formatting where appropriate.
+- Refer to client's files if they mention sending files.
+- If they ask about scheduling a call or meeting, politely guide them to click the "Consultation Scheduler" tab on your profile page to pick an available slot.
+- If they ask about pricing, explain your services can be booked via flexible starter hours, standard retaining, or hourly contracts, and encourage them to view the scheduling catalog.
+- If they ask how to proceed, guide them to schedule a kickoff consultation using your scheduling tab.
+- If the client's message is brief (e.g., "Hello" or "hi"), greet them warmly, express excitement about collaborating, and ask how you can help optimize their operations.
+`;
+
+        // Convert existing message history to Gemini format. Limit to last 15 messages for token control.
+        const history = chat.messages.slice(-15).map(msg => ({
+          role: msg.sender === "client" ? "user" : "model",
+          parts: [{ text: msg.content }]
+        }));
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: history,
+          config: {
+            systemInstruction: systemInstruction,
+            temperature: 0.7,
+          }
+        });
+
+        const replyText = response.text || `Hi! This is ${agent.name.split(" ")[0]} here. I've received your message and would love to help. Let's schedule a brief kickoff call!`;
+        
+        chat.messages.push({
+          id: "msg_" + Math.random().toString(36).substring(2, 9),
+          sender: "agent",
+          content: replyText,
+          timestamp: new Date().toISOString()
+        });
+        saveDatabase();
+
+      } catch (error: any) {
+        const errorStr = String(error?.message || error || "");
+        const isLeaked = errorStr.includes("leaked") || errorStr.includes("403") || errorStr.includes("PERMISSION_DENIED");
+        
+        let replyContent = getLocalAgentFallback(agent, content);
+        if (isLeaked) {
+          replyContent = `⚠️ **Workspace Security Notice:** The configured GEMINI_API_KEY environment variable was flagged as leaked or unauthorized (403 PERMISSION_DENIED). Operating in high-performance local keyword mode.\n\n` + replyContent;
+        }
+        
+        chat.messages.push({
+          id: "msg_" + Math.random().toString(36).substring(2, 9),
+          sender: "agent",
+          content: replyContent,
+          timestamp: new Date().toISOString()
+        });
+        saveDatabase();
+      }
+    }, 1200);
   }
 
   saveDatabase();
   res.json(newMessage);
 });
+
+function getLocalAgentFallback(agent: any, clientMessage: string): string {
+  const agentFirstName = agent.name.split(" ")[0];
+  const queryLower = clientMessage.toLowerCase();
+  
+  let reply = `Hi there! This is ${agentFirstName} here. Thank you for connecting through Vesta's Intelligent Matching portal. I have received your details! Let's arrange our kickoff consultation. Feel free to book direct in my scheduler or drop any files/templates here!`;
+  
+  if (queryLower.includes("pricing") || queryLower.includes("cost") || queryLower.includes("rate") || queryLower.includes("fee")) {
+    reply = `Absolutely! I can take a look at your budget tier. Based on my background in ${agent.specialties[0] || "operations"}, we can coordinate our starter hours, standard retaining, or execute on an hourly scope. What works best for your initial scale?`;
+  } else if (queryLower.includes("meeting") || queryLower.includes("call") || queryLower.includes("zoom") || queryLower.includes("schedule")) {
+    reply = `I am completely free during the available times listed on my calendar panel! Go ahead and select a slot in the Booking Scheduler block and we'll jump on a secure line right away.`;
+  } else if (queryLower.includes("skill") || queryLower.includes("experience") || queryLower.includes("what can you do") || queryLower.includes("capable")) {
+    reply = `I specialize in ${agent.specialties.join(", ")}. My core technical toolkit includes: ${agent.skills.join(", ")}. I'm fully equipped at the ${agent.experienceLevel} tier to handle your operational bottlenecks!`;
+  }
+  
+  return reply;
+}
 
 // 5. PLATFORM STATISTICS (ADMIN)
 app.get("/api/admin/stats", (req, res) => {
@@ -574,8 +720,17 @@ app.post("/api/match", async (req, res) => {
           console.log("Text match output:", textOutput);
           matchPrediction = JSON.parse(textOutput.trim());
         }
-      } catch (geminiError) {
-        console.warn("Gemini matchmaking block failed, activating local rule-based matching fallback:", geminiError);
+      } catch (geminiError: any) {
+        const errorStr = String(geminiError?.message || geminiError || "");
+        const isLeaked = errorStr.includes("leaked") || errorStr.includes("403") || errorStr.includes("PERMISSION_DENIED");
+        
+        if (isLeaked) {
+          console.warn("Vesta Config Warning: The configured GEMINI_API_KEY was reported as invalid or leaked. Operating matchmaking in local-rules fallback mode.");
+          // Attach a custom field to indicate key issues
+          (req as any).geminiKeyLeaked = true;
+        } else {
+          console.warn("Gemini matchmaking block failed, activating local rule-based matching fallback:", geminiError);
+        }
         matchPrediction = null;
       }
     }
@@ -602,12 +757,18 @@ app.post("/api/match", async (req, res) => {
       const matchedAgentId = targetService.assignedAgentId;
       const skillsExtracted = targetService.skillsRequired.slice(0, 3);
       
+      let reasoningText = `Our rule matches determined you require assistance in ${targetService.name}. We connected you directly with ${dbState.agents.find(a => a.id === matchedAgentId)?.name || "our assigned agent"} who holds verified credentials.`;
+      
+      if ((req as any).geminiKeyLeaked) {
+        reasoningText = `⚠️ **Workspace Security Notice:** The configured GEMINI_API_KEY environment variable was flagged as leaked or unauthorized (403 PERMISSION_DENIED). We activated our local matchmaking engine fallback. Please replace the key under Settings to restore cognitive capabilities.\n\n` + reasoningText;
+      }
+
       matchPrediction = {
         matchedServiceId,
         matchedAgentId,
         confidenceScore: 0.85,
         skillsExtracted,
-        reasoningText: `Our rule matches determined you require assistance in ${targetService.name}. We connected you directly with ${dbState.agents.find(a => a.id === matchedAgentId)?.name || "our assigned agent"} who holds verified credentials.`
+        reasoningText
       };
     }
 
@@ -792,9 +953,20 @@ INSTRUCTIONS & BEHAVIOR ROLES:
     const replyText = response.text || "I am here to assist you with active bookings, price tiers, and human resources. Let me know what you need!";
     res.json({ text: replyText });
 
-  } catch (error) {
-    console.warn("Gemini VIC support bot error (falling back to keyword matching):", error);
-    const fallbackReply = getLocalChatFallback(messages);
+  } catch (error: any) {
+    const errorStr = String(error?.message || error || "");
+    const isLeaked = errorStr.includes("leaked") || errorStr.includes("403") || errorStr.includes("PERMISSION_DENIED");
+    
+    if (isLeaked) {
+      console.warn("Vesta Config Warning: The configured GEMINI_API_KEY was reported as invalid or leaked. Operating in high-performance local keyword mode.");
+    } else {
+      console.warn("Gemini VIC support bot error (falling back to keyword matching):", error);
+    }
+    
+    let fallbackReply = getLocalChatFallback(messages);
+    if (isLeaked) {
+      fallbackReply = `⚠️ **Workspace Security Notice:** The configured Gemini API key in this environment has been flagged as leaked or unauthorized (403 PERMISSION_DENIED). To restore full AI capabilities, please navigate to the **Settings** menu at the top-right and configure a fresh **GEMINI_API_KEY** environment variable.\n\n` + fallbackReply;
+    }
     res.json({ text: fallbackReply });
   }
 });
